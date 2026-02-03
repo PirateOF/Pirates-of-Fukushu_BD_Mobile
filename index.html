@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Pirates of Fukushu - Barrel Dash</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+  html, body { 
+    margin:0; 
+    padding:0;
+    background:#0c1117; 
+    color:#e6edf3; 
+    font-family: system-ui; 
+    overflow: hidden; 
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #ui { 
+    position: fixed; 
+    top: 0; left: 0; right: 0; 
+    display: flex; 
+    justify-content: center; 
+    gap: 5px; 
+    z-index: 10; 
+    padding: 5px;
+    pointer-events: none; /* Klicks gehen durch das UI ans Spiel */
+  }
+
+  .panel { 
+    background: rgba(11, 18, 24, 0.8); 
+    padding: 4px 8px; 
+    border: 1px solid #1f2a36; 
+    border-radius: 6px; 
+    backdrop-filter: blur(4px);
+    font-size: 14px;
+    pointer-events: auto;
+  }
+
+  canvas { 
+    display: block; 
+    background: #000; 
+    border: 2px solid #30363d; 
+    image-rendering: pixelated; 
+    
+    /* Der magische Teil: Passt sich proportional an */
+    max-width: 100%; 
+    max-height: 85vh; /* Lässt Platz für die Buttons unten */
+    width: auto;
+    height: auto;
+    margin: auto; /* Zentriert das Spiel */
+  }
+
+  /* Spezielle Anpassung für das Querformat (Landscape) */
+  @media (max-height: 500px) {
+    canvas { max-height: 75vh; }
+    #ui { font-size: 10px; }
+    .panel { padding: 2px 5px; }
+  
+  /* NEU: Hier fügst du die iPad-Fixes ein */
+  #mobile-controls button {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent; /* Verhindert das graue Flackern beim Tippen */
+  }
+</style>
+
+</head>
+<body>
+
+<div id="start-screen" onclick="startGame()" style="
+    position: fixed; 
+    top: 0; left: 0; width: 100%; height: 100%; 
+    background: #000 url('out/BarrelDash_Title.png') no-repeat center center; 
+    background-size: contain; 
+    z-index: 1000; 
+    display: flex; 
+    justify-content: center; 
+    align-items: flex-end; 
+    cursor: pointer;">
+    
+    <div style="
+        color: white; 
+        font-family: system-ui; 
+        font-size: 5vw; 
+        margin-bottom: 50px; 
+        text-shadow: 2px 2px 4px #000; 
+        animation: blink 1s infinite;
+        text-align: center; 
+        width: 100%;">
+        PRESS ANY KEY OR CLICK TO START
+    </div>
+</div>
+
+<style>
+    @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+</style>
+
+<div id="ui">
+  <div class="panel" id="score">Score: 0 | Gold: 0 / 0 | Lives: 3 | Level: 1</div>
+  <div class="panel" id="status">Good luck, Pirate!</div>
+</div>
+
+<div id="mobile-controls" style="display:none; position:fixed; bottom:10px; left:10px; right:10px; justify-content:space-between; align-items:flex-end; z-index:100; user-select:none;">
+  
+  <div style="display:flex; flex-direction:column; gap:15px;">
+    <button onpointerdown="if(!gameStarted) startGame(); if(gameState === 'PLAYING') killPlayer();" 
+            style="width:85px; height:85px; border-radius:50%; background:rgba(128, 0, 32, 0.8); color:white; border:3px solid white; font-weight:bold; font-size:24px; box-shadow: 0 4px 10px rgba(0,0,0,0.5);">K</button>
+    <button onpointerdown="player.totalScore = 0; resetGame();" 
+            style="width:85px; height:50px; border-radius:12px; background:rgba(31, 42, 54, 0.8); color:white; border:2px solid white; font-weight:bold; font-size:18px;">F2</button>
+    <button onclick="toggleFullscreen();" 
+        style="width:85px; height:50px; border-radius:12px; background:rgba(0, 100, 0, 0.8); color:white; border:2px solid white; font-weight:bold; font-size:11px; margin-top:10px; line-height:1; padding: 2px;">FULLSCREEN / 	EXIT</button>
+  </div>
+
+  <div style="display:grid; 
+            grid-template-areas: 
+              '. up .'
+              'left down right'; 
+            grid-template-columns: repeat(3, 75px); 
+            grid-template-rows: repeat(2, 75px); 
+            gap:10px;">
+  
+  <button onpointerdown="keys.add('ArrowUp')" 
+          onpointerup="keys.delete('ArrowUp')" 
+          onpointerleave="keys.delete('ArrowUp')" 
+          onpointercancel="keys.delete('ArrowUp')" 
+          style="grid-area: up; height:75px; width:75px; background:rgba(48, 54, 61, 0.4); border:2px solid #fff; color:white; border-radius:12px; font-size: 24px;">▲</button>
+  
+  <button onpointerdown="keys.add('ArrowLeft')" 
+          onpointerup="keys.delete('ArrowLeft')" 
+          onpointerleave="keys.delete('ArrowLeft')" 
+          onpointercancel="keys.delete('ArrowLeft')" 
+          style="grid-area: left; height:75px; width:75px; background:rgba(48, 54, 61, 0.4); border:2px solid #fff; color:white; border-radius:12px; font-size: 24px;">◀</button>
+  
+  <button onpointerdown="keys.add('ArrowDown')" 
+          onpointerup="keys.delete('ArrowDown')" 
+          onpointerleave="keys.delete('ArrowDown')" 
+          onpointercancel="keys.delete('ArrowDown')" 
+          style="grid-area: down; height:75px; width:75px; background:rgba(48, 54, 61, 0.4); border:2px solid #fff; color:white; border-radius:12px; font-size: 24px;">▼</button>
+  
+  <button onpointerdown="keys.add('ArrowRight')" 
+          onpointerup="keys.delete('ArrowRight')" 
+          onpointerleave="keys.delete('ArrowRight')" 
+          onpointercancel="keys.delete('ArrowRight')" 
+          style="grid-area: right; height:75px; width:75px; background:rgba(48, 54, 61, 0.4); border:2px solid #fff; color:white; border-radius:12px; font-size: 24px;">▶</button>
+</div>
+
+</div>
+
+<canvas id="game" width="960" height="576"></canvas>
+
+<script>
+// Verbindung zu Supabase herstellen
+const supabaseUrl = 'https://sqpbvfcrihfekwbywmkx.supabase.co'; 
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNxcGJ2ZmNyaWhmZWt3Ynl3bWt4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkxNzk5NzIsImV4cCI6MjA4NDc1NTk3Mn0.TFBGZ23EeAZhWVIRNV7aDBDvIbSnpITqWCpsWokky1o';
+const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+
+// --- Dieser BLOCK fügt die Musik ein ---
+const bgMusic = new Audio('out/BarrelDash_Music.mp3');
+bgMusic.loop = true;
+bgMusic.volume = 0.1;
+
+let gameStarted = false;
+
+function startGame() {
+    if (gameStarted) return;
+    gameStarted = true;
+
+    const screen = document.getElementById('start-screen');
+    if (screen) screen.style.display = 'none';
+
+    bgMusic.play().catch(e => console.log("Musik-Start verzögert:", e));
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    gameState = "PLAYING";
+}
+
+window.addEventListener('keydown', () => { if (!gameStarted) startGame(); }, { once: true });
+// -------------------------------------
+
+// Eine Variable, um zu speichern, ob wir den Highscore schon abgefragt haben
+
+let highscorePrompted = false;
+let topScores = []; // Hier speichern wir die Daten aus der Datenbank
+
+const TILE = 48, GRID_W = 20, GRID_H = 12;
+const TYPES = { AIR:0, EARTH:1, BARREL:2, GOLD:3, EXIT:4, WALL:5, ROCK:6 };
+const FRAME = 128;
+
+let gameState = "START"; 
+let exitVisible = false;
+let grid = [];
+let player = { 
+    x: 2, y: 2,           // Grid position
+    renderX: 2 * TILE,    // Visual position
+    renderY: 2 * TILE, 
+    dir: "front", gold: 0, lives: 3, totalScore: 0 
+};
+let enemies = [];
+let fireballs = [];
+let totalGold = 0;
+let levelCount = 1;
+let currentLevelRequiredGold = 0; // Wie viele wir sammeln MÜSSEN
+let currentLevelTotalGold = 0;    // Wie viele insgesamt im Level liegen
+let shake = 0; 
+
+// --- THIS IS THE MOBILE DETECTION HERE ---
+// 1. Check if the device is a mobile phone/tablet
+const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+// 2. Check if the device actually has a touch screen
+const hasTouchScreen = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+// 3. Only show the controls if BOTH are true
+const mobileContainer = document.getElementById('mobile-controls');
+
+if (isMobileDevice && hasTouchScreen) {
+    mobileContainer.style.display = 'flex';
+
+    // Nutze pointerdown statt touchstart für bessere iPad-Unterstützung
+    document.addEventListener('pointerdown', (e) => {
+        // Findet den Button, auch wenn man genau auf das Icon/Text im Button drückt
+        const btn = e.target.closest('button');
+        
+        if (btn && btn.innerText !== 'FULLSCREEN / EXIT') {
+            e.preventDefault(); 
+        }
+    }, { passive: false });
+} 
+
+else {
+    // If it's a laptop/desktop, make sure it stays hidden
+    mobileContainer.style.display = 'none';
+}
+// ----------------------------------------
+
+// Audio auch bei Touch-Start aktivieren (wichtig für Mobile!)
+window.addEventListener('touchstart', () => { 
+    if (audioCtx.state === 'suspended') audioCtx.resume(); 
+}, { once: true });
+
+
+// --- ANIMATIONS-LOGIK FÜR DIE MÜNZEN ---
+let coinAnimTimer = 0;
+const coinFrames = [];
+const COIN_FRAME_COUNT = 8;
+for (let i = 1; i <= COIN_FRAME_COUNT; i++) {
+    const img = new Image();
+    img.src = `out/coin_${i}.jpg`; // Pfad zu deinen Dateien
+    coinFrames.push(img);
+}
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+
+const scoreEl = document.getElementById("score");
+const statusEl = document.getElementById("status");
+
+/* =============== Assets =============== */
+const SPRITES = {
+  left:  { img:new Image(), src:"out/pirate_left_clean.png"  },
+  right: { img:new Image(), src:"out/pirate_right_clean.png" },
+  front: { img:new Image(), src:"out/pirate_front_clean.png" },
+  back:  { img:new Image(), src:"out/pirate_back_clean.png"  },
+  fremlinL: { img:new Image(), src:"out/fremlin_left.png" },
+  fremlinR: { img:new Image(), src:"out/fremlin_right.png" }
+};
+for (const k in SPRITES) SPRITES[k].img.src = SPRITES[k].src;
+// --- SOUND ENGINE ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playSfx(type) {
+    const now = audioCtx.currentTime;
+
+    // Hilfsfunktion für einfache Sounds
+    const playTone = (freq, duration, type = 'sine', volume = 0.1, drop = true) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now);
+        if (drop) osc.frequency.exponentialRampToValueAtTime(0.01, now + duration);
+        gain.gain.setValueAtTime(volume, now);
+        gain.gain.linearRampToValueAtTime(0, now + duration);
+        osc.start(now);
+        osc.stop(now + duration);
+    };
+
+    switch(type) {
+        case 'coin': // Bling
+            playTone(900, 0.3, 'sine', 0.1, false);
+            // Ein zweiter, höherer Ton kurz danach für das "Bling"
+            setTimeout(() => {
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.connect(g); g.connect(audioCtx.destination);
+                o.frequency.setValueAtTime(1300, audioCtx.currentTime);
+                g.gain.setValueAtTime(0.05, audioCtx.currentTime);
+                g.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+                o.start(); o.stop(audioCtx.currentTime + 0.1);
+            }, 50);
+            break;
+
+	case 'dig':
+    	    playTone(150, 0.08, 'triangle', 0.08); // Sehr kurz und dumpf
+    	    break;
+
+        case 'pew': // Fremlin Schuss
+            playTone(400, 0.1, 'sawtooth', 0.05);
+            break;
+
+	case 'portal': playTone(200, 1.0, 'sine', 0.1, true); break;
+
+        case 'squash': // Fremlin Matsch
+            playTone(150, 0.2, 'square', 0.1);
+            break;
+
+        case 'death': // Dunkles Bowng
+            playTone(120, 0.5, 'triangle', 0.2);
+            break;
+
+        case 'gameover': // Bowng, Bowng, Boooowng
+            [0, 0.3, 0.7].forEach((delay, i) => {
+                setTimeout(() => {
+                    const freq = i === 2 ? 60 : 100 - (i * 20);
+                    playTone(freq, 0.6, 'triangle', 0.2);
+                }, delay * 1000);
+            });
+            break;
+    }
+}
+
+// Aktiviert Audio beim ersten Tastendruck (Browser-Sicherheit)
+window.addEventListener('keydown', () => { 
+    if (audioCtx.state === 'suspended') audioCtx.resume(); 
+}, { once: true });
+
+// --- HIER ENDET DER NEUE SOUND CODE ---
+
+const keys = new Set();
+window.onkeydown = e => {
+    const k = e.key.toLowerCase(); // Damit es bei 'k' und 'K' funktioniert
+    keys.add(k); 
+    keys.add(e.code); 
+    if(e.code === "F2") { player.totalScore = 0; resetGame(); }
+    // NEU: Die Selbstmord-Taste
+    if (k === 'k' && gameState === "PLAYING") {
+    killPlayer();
+    }
+};
+window.onkeyup = e => keys.delete(e.code);
+
+function resetGame() {
+    player.lives = 3;
+    levelCount = 1;
+    highscorePrompted = false;
+    generateLevel();
+}
+
+function generateLevel() {
+  gameState = "PLAYING";
+  exitVisible = false;
+  player.gold = 0;
+  enemies = [];
+  fireballs = [];
+  keys.clear();
+  
+  grid = Array.from({length:GRID_H}, () => Array(GRID_W).fill(TYPES.EARTH));
+
+  // Wände ziehen
+  for (let y=0; y<GRID_H; y++) { grid[y][0]=TYPES.WALL; grid[y][GRID_W-1]=TYPES.WALL; }
+  for (let x=0; x<GRID_W; x++) { grid[0][x]=TYPES.WALL; grid[GRID_H-1][x]=TYPES.WALL; }
+
+  // --- TUNNEL Um ein eisperren des Piraten zu verhindern ---
+  // Wir wählen einen zufälligen Zielpunkt, der nicht zu nah am Start liegt
+  // GRID_W-2 sorgt dafür, dass wir nicht in die Außenwand graben
+  let targetX = Math.floor(Math.random() * (GRID_W - 4)) + 3; 
+  let targetY = Math.floor(Math.random() * (GRID_H - 4)) + 3;
+
+  // Horizontal graben (von x=2 bis zum Zufalls-Ziel)
+  for (let x = Math.min(2, targetX); x <= Math.max(2, targetX); x++) {
+      grid[2][x] = TYPES.AIR;
+  }
+  // Vertikal graben (von y=2 bis zum Zufalls-Ziel)
+  for (let y = Math.min(2, targetY); y <= Math.max(2, targetY); y++) {
+      grid[y][targetX] = TYPES.AIR;
+  }
+  // -------------------------------------
+
+  // Gegner-Logik
+  const enemyCount = 1 + Math.floor((levelCount - 1) / 2);
+  for(let i=0; i < enemyCount; i++) {
+      let startX = Math.floor(Math.random()*(GRID_W-6))+3;
+      let startY = Math.floor(Math.random()*(GRID_H-6))+3;
+      for(let j=0; j<6; j++) {
+          grid[startY + Math.floor(j/3)][startX + (j%3)] = TYPES.AIR;
+      }
+      enemies.push({ x: startX * TILE, y: startY * TILE, dx: TILE, dy: 0, moveCooldown: 0, facing: "right" });
+  }
+
+  // --- NEUE LOGIK FÜR LEVEL-STUFEN ---
+  if (levelCount <= 3) {
+      currentLevelTotalGold = 20;    
+      currentLevelRequiredGold = 15; 
+  } else if (levelCount <= 6) {
+      currentLevelTotalGold = 25;    
+      currentLevelRequiredGold = 20; 
+  } else {
+      currentLevelTotalGold = 30;    
+      currentLevelRequiredGold = 25; 
+  }
+
+  // --- GOLD EXAKT PLATZIEREN ---
+  let placedGold = 0;
+  while(placedGold < currentLevelTotalGold) {
+      let rx = Math.floor(Math.random()*(GRID_W-2))+1;
+      let ry = Math.floor(Math.random()*(GRID_H-2))+1;
+      if(grid[ry][rx] === TYPES.EARTH && !(rx === 2 && ry === 2)) {
+          grid[ry][rx] = TYPES.GOLD;
+          placedGold++;
+      }
+  }
+
+  // --- HIER WURDE DAS EXTRA-GOLD ENTFERNT ---
+  for (let y=1; y<GRID_H-1; y++){
+    for (let x=1; x<GRID_W-1; x++){
+      if (grid[y][x] !== TYPES.EARTH) continue;
+      if (x === 2 && y === 2) { grid[y][x] = TYPES.AIR; continue; }
+      
+      const r = Math.random();
+      const barrelChance = 0.10 + (levelCount * 0.005);
+      const rockChance = barrelChance + 0.05 + (levelCount * 0.002);
+
+      if (r < barrelChance)      grid[y][x] = TYPES.BARREL;
+      else if (r < rockChance)   grid[y][x] = TYPES.ROCK;
+      // Keine else if für Gold mehr hier!
+    }
+  }
+
+  player.x = 2; player.y = 2;
+  player.renderX = player.x * TILE;
+  player.renderY = player.y * TILE;
+  // totalGold Zeile wurde entfernt, wir nutzen jetzt currentLevelTotalGold
+}
+
+function tryMove(dx, dy) {
+  if (gameState !== "PLAYING") return;
+  if (Math.abs(player.renderX - player.x * TILE) > 1 || Math.abs(player.renderY - player.y * TILE) > 1) return;
+
+  const tx = player.x + dx;
+  const ty = player.y + dy;
+  const tile = grid[ty][tx];
+
+  if (tile === TYPES.WALL || tile === TYPES.ROCK) return;
+  
+  if (dy === 0 && tile === TYPES.BARREL) {
+    const nextX = tx + dx;
+    
+    // Prüfen, ob an der Stelle, wohin wir schieben, ein Gegner steht
+    let enemyAtTarget = enemies.find(en => 
+        Math.round(en.x / TILE) === nextX && 
+        Math.round(en.y / TILE) === ty
+    );
+
+    // FALL 1: Das Feld dahinter ist komplett leer
+    if (grid[ty][nextX] === TYPES.AIR && !enemyAtTarget) {
+      grid[ty][nextX] = TYPES.BARREL;
+      grid[ty][tx] = TYPES.AIR;
+      player.x = tx; player.y = ty;
+    } 
+    // FALL 2: Da steht ein Gegner, aber dahinter ist eine Wand (SQUASH!)
+    else if (enemyAtTarget && (grid[ty][nextX + dx] === TYPES.WALL || grid[ty][nextX + dx] === TYPES.ROCK)) {
+      playSfx('squash');
+      player.totalScore += 100; // Bonus Punkte
+      enemies = enemies.filter(en => en !== enemyAtTarget); // Gegner entfernen
+      
+      grid[ty][nextX] = TYPES.BARREL; // Fass rückt auf den Platz des Gegners
+      grid[ty][tx] = TYPES.AIR;
+      player.x = tx; player.y = ty;
+      shake = 8; 
+    }
+    // Falls ein Gegner im Weg ist, aber Platz zum Ausweichen hätte, 
+    // passiert einfach nichts (das Fass blockiert), damit du nicht stirbst.
+    
+    return;
+  }
+
+ if (tile !== TYPES.BARREL) {
+    // Wenn das Feld Erde ODER Gold ist...
+    if (tile === TYPES.EARTH || tile === TYPES.GOLD) {
+      
+      // FALL A: Es ist Erde -> Dig-Sound
+      if (tile === TYPES.EARTH) {
+        playSfx('dig');
+      } 
+      // FALL B: Es ist Gold -> Coin-Sound + Punkte
+      else if (tile === TYPES.GOLD) {
+    player.gold++; // Wir zählen, wie viele Münzen wir in DIESEM Level haben
+    
+    // Die Punkte-Regel:
+    if (player.gold <= currentLevelRequiredGold) {
+      // Das ist noch Pflicht-Gold (z.B. die 1. bis 15. Münze)
+      player.totalScore += 10;
+    } else {
+      // Das ist Bonus-Gold! (Ab der 16. Münze)
+      player.totalScore += 20;
+    }
+
+    playSfx('coin');
+    grid[ty][tx] = TYPES.AIR; // Die Münze verschwindet vom Spielfeld
+  }
+
+      // In beiden Fällen wird das Feld nun zu Luft (AIR)
+      grid[ty][tx] = TYPES.AIR;
+    }
+
+    if (tile === TYPES.EXIT && exitVisible) { levelCount++; generateLevel(); return; }
+    player.x = tx; player.y = ty;
+  }
+}
+
+let physicsTick = 0;
+let fallingBarrels = new Set(); 
+
+function updatePhysics() {
+    player.renderX += (player.x * TILE - player.renderX) * 0.25;
+    player.renderY += (player.y * TILE - player.renderY) * 0.25;
+
+    physicsTick++;
+    if (physicsTick % 12 === 0) { 
+        let nextFalling = new Set();
+        for (let y = GRID_H - 2; y >= 1; y--) {
+            for (let x = 1; x < GRID_W - 1; x++) {
+                if (grid[y][x] === TYPES.BARREL) {
+                    const posKey = `${x},${y}`;
+                    const spaceBelow = grid[y+1][x];
+                    const playerIsBelow = (player.x === x && player.y === y+1);
+
+                    if (spaceBelow === TYPES.AIR && !playerIsBelow) {
+                        grid[y][x] = TYPES.AIR;
+                        grid[y+1][x] = TYPES.BARREL;
+                        nextFalling.add(`${x},${y+1}`);
+                        enemies = enemies.filter(en => {
+                            if (Math.round(en.x/TILE) === x && Math.round(en.y/TILE) === y+1) {
+                                player.totalScore += 50;
+				playSfx('squash'); // <--sound
+                                return false;
+                            }
+                            return true;
+                        });
+                    } 
+                    else if (playerIsBelow && fallingBarrels.has(posKey)) {
+                        killPlayer();
+                        
+                    }
+                    else if ((spaceBelow === TYPES.BARREL || spaceBelow === TYPES.ROCK) && !playerIsBelow) {
+                        if (grid[y][x-1] === TYPES.AIR && grid[y+1][x-1] === TYPES.AIR && !(player.x === x-1 && player.y === y)) {
+                            grid[y][x] = TYPES.AIR; grid[y][x-1] = TYPES.BARREL;
+                        } else if (grid[y][x+1] === TYPES.AIR && grid[y+1][x+1] === TYPES.AIR && !(player.x === x+1 && player.y === y)) {
+                            grid[y][x] = TYPES.AIR; grid[y][x+1] = TYPES.BARREL;
+                        }
+                    }
+                }
+            }
+        }
+        fallingBarrels = nextFalling;
+    }
+
+    enemies.forEach(en => {
+// In updatePhysics() - bei den Enemies
+if (en.moveCooldown <= 0) {
+    let currentX = Math.round(en.x / TILE);
+    let currentY = Math.round(en.y / TILE);
+    
+    // 1. CHANCE TO CHANGE DIRECTION (The "Smart" part)
+    // We check if they are perfectly aligned with a tile, 
+    // then give them a 30% chance to look for a turn.
+    if (Math.random() < 0.30) { 
+        const dirs = [[TILE, 0], [-TILE, 0], [0, TILE], [0, -TILE]];
+        // Filter directions to see which ones are actually AIR (open)
+        const possibleDirs = dirs.filter(d => {
+            let tx = currentX + (d[0] / TILE);
+            let ty = currentY + (d[1] / TILE);
+            return grid[ty] && grid[ty][tx] === TYPES.AIR;
+        });
+
+        if (possibleDirs.length > 0) {
+            const newDir = possibleDirs[Math.floor(Math.random() * possibleDirs.length)];
+            en.dx = newDir[0];
+            en.dy = newDir[1];
+        }
+    }
+
+    // 2. ACTUAL MOVEMENT LOGIC
+    let nTX = currentX + (en.dx / TILE);
+    let nTY = currentY + (en.dy / TILE);
+    
+    if (grid[nTY] && grid[nTY][nTX] === TYPES.AIR) {
+        en.x += en.dx; 
+        en.y += en.dy;
+        en.moveCooldown = 20; 
+        
+        // Shoot fireball logic stays the same...
+        if(Math.random() < 0.04) { 
+            fireballs.push({ x: en.x, y: en.y, dx: en.dx*0.12, dy: en.dy*0.12 });
+            playSfx('pew');
+        }
+    } else {
+        // This part runs if they HIT a wall (backup plan)
+        const dirs = [[TILE,0], [-TILE,0], [0,TILE], [0,-TILE]];
+        const d = dirs[Math.floor(Math.random()*4)];
+        en.dx = d[0]; en.dy = d[1];
+    }
+    
+    // Update facing direction for the sprite
+    if (en.dx !== 0) en.facing = en.dx < 0 ? "left" : "right";
+
+} else { 
+    en.moveCooldown--; 
+}        if (Math.abs(en.x - player.renderX) < 32 && Math.abs(en.y - player.renderY) < 32) killPlayer();
+    });
+
+    fireballs.forEach((fb, i) => {
+        fb.x += fb.dx; fb.y += fb.dy;
+        let tx = Math.round(fb.x/TILE), ty = Math.round(fb.y/TILE);
+        if (grid[ty] && grid[ty][tx] !== TYPES.AIR) fireballs.splice(i, 1);
+        if (Math.abs(fb.x - player.renderX) < 20 && Math.abs(fb.y - player.renderY) < 20) killPlayer();
+    });
+
+    if (shake > 0) shake *= 0.9;
+}
+
+function killPlayer() {
+    player.lives--;
+    shake = 12;
+    if (player.lives <= 0) {
+        gameState = "GAME_OVER";
+        playSfx('gameover');
+        
+        if (!highscorePrompted) {
+            highscorePrompted = true;
+            const scoreToSave = player.totalScore; 
+
+            // PRÜFUNG: Ist man in den Top 10?
+            // Fall A: Liste ist noch nicht voll (< 10 Einträge)
+            // Fall B: Score ist höher als der letzte Eintrag in den Top 10
+            const isTopTen = topScores.length < 10 || scoreToSave > topScores[topScores.length - 1].score;
+
+            if (isTopTen) {
+                setTimeout(() => {
+                    let playerName = prompt("ARRR! A New Highscore! Tell us yer name:", "Pirate");
+                    if (playerName && playerName.trim() !== "") {
+                        saveHighscore(playerName, scoreToSave);
+                    }
+                }, 600);
+            } else {
+                console.log("Nicht in den Top 10 gelandet. Übe weiter, Pirat!");
+            }
+        }
+    } else { 
+        playSfx('death');
+        player.x = 2; player.y = 2; 
+        player.renderX = 2 * TILE; player.renderY = 2 * TILE;
+        keys.clear(); 
+    }
+}
+
+function draw() {
+  ctx.fillStyle = "#000"; 
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  ctx.save();
+  if (shake > 1) ctx.translate(Math.random()*shake - shake/2, Math.random()*shake - shake/2);
+
+  for (let y=0; y<GRID_H; y++) {
+    for (let x=0; x<GRID_W; x++) {
+      const px = x*TILE, py = y*TILE, t = grid[y][x];
+      if (t === TYPES.WALL) { ctx.fillStyle = "#1a1c23"; ctx.fillRect(px,py,TILE,TILE); }
+      else if (t === TYPES.ROCK) {
+        ctx.fillStyle = "#374151"; ctx.beginPath(); ctx.roundRect(px+4, py+4, TILE-8, TILE-8, 8); ctx.fill();
+      }
+      else if (t === TYPES.EARTH) {
+        ctx.fillStyle = "#5d3a1a"; ctx.fillRect(px, py, TILE, TILE);
+        const seed = (x * 123) + (y * 456); 
+        for (let i = 0; i < 4; i++) {
+          ctx.fillStyle = "#4a2e15";
+          ctx.fillRect(px + (Math.abs(Math.sin(seed+i)*30)), py + (Math.abs(Math.cos(seed+i)*30)), 3, 3);
+        }
+      }
+      else if (t === TYPES.BARREL) {
+        ctx.fillStyle = '#6b3f1f'; ctx.fillRect(px+5, py, TILE-10, TILE);
+        ctx.fillStyle = '#b1b5bd'; ctx.fillRect(px+4, py+8, TILE-8, 4); ctx.fillRect(px+4, py+TILE-12, TILE-8, 4);
+      }
+      else if (t === TYPES.GOLD) { 
+        // --- GOLD ANIMATION ---
+        const frameIndex = Math.floor(coinAnimTimer / 20) % COIN_FRAME_COUNT;
+        const currentFrame = coinFrames[frameIndex];
+        if (currentFrame.complete) {
+            ctx.drawImage(currentFrame, px+4, py+4, TILE-8, TILE-8);
+        }
+      }
+     else if (t === TYPES.EXIT && exitVisible) { 
+        // Wir nutzen den vorhandenen physicsTick für die Bewegung
+        const anim = physicsTick * 0.05;
+        
+	// 1. Der Nebel in dunklem Burgunderrot (halbtransparent)
+        // rgba(128, 0, 32, 0.2) entspricht einem transparenten Burgunder
+        ctx.fillStyle = "rgba(128, 0, 32, 0.2)"; 
+        for(let i = 0; i < 6; i++) {
+          const xOff = Math.sin(anim + i * 1.5) * 14;
+          const yOff = Math.cos(anim * 0.6 + i) * 14;
+          ctx.beginPath();
+          ctx.arc(px + TILE/2 + xOff, py + TILE/2 + yOff, 12, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 2. Der pulsierende Kern in Burgunderrot (#800020)
+        const pulse = Math.sin(anim * 2) * 5;
+        ctx.fillStyle = "#800020"; 
+        ctx.beginPath();
+        ctx.roundRect(px + 10 - pulse/2, py + 10 - pulse/2, TILE - 20 + pulse, TILE - 20 + pulse, 10);
+        ctx.fill();
+        
+        // Weißer Glanz-Effekt für den "Portal-Look"
+        ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+        ctx.fillRect(px + TILE/2 - 2, py + 15, 4, TILE - 30);
+      }
+    }
+  }
+
+  enemies.forEach(en => { 
+      let img = en.facing === "left" ? SPRITES.fremlinL.img : SPRITES.fremlinR.img;
+      if (img.complete) ctx.drawImage(img, en.x, en.y, TILE, TILE); 
+  });
+
+  fireballs.forEach(fb => { 
+    ctx.fillStyle = "#ff4500"; ctx.beginPath(); ctx.arc(fb.x+24, fb.y+24, 6, 0, Math.PI*2); ctx.fill(); 
+  });
+  
+  const sp = SPRITES[player.dir].img;
+  if (sp.complete) ctx.drawImage(sp, 0, 0, FRAME, FRAME, player.renderX, player.renderY, TILE, TILE);
+
+  ctx.restore();
+
+  if (gameState !== "PLAYING") {
+    
+    // 2. Hintergrund abdunkeln
+    ctx.fillStyle = "rgba(0,0,0,0.85)"; 
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    
+    // 3. Haupt-Texte (nach oben verschoben)
+    ctx.fillStyle = "white"; 
+    ctx.textAlign = "center"; 
+    ctx.font = "bold 40px system-ui";
+    ctx.fillText(gameState === "GAME_OVER" ? "GAME OVER" : "LEVEL COMPLETED!", 480, 120);
+    
+    ctx.font = "24px system-ui"; 
+    ctx.fillText(`Final Score: ${player.totalScore}`, 480, 170);
+
+    // 4. Die Highscore-Liste (in der Mitte)
+    drawHighscores(480, 240); 
+
+    // 5. Neustart-Hinweis (ganz unten)
+    ctx.font = "20px system-ui"; 
+    ctx.fillStyle = "#aaaaaa";
+    ctx.fillText("Press F2 to restart", 480, 540);
+  }
+
+  // Wir berechnen wieder den Gold-Zähler (maximal 15/15, 20/20 etc.)
+  let displayGold = Math.min(player.gold, currentLevelRequiredGold);
+
+  // Hier packen wir jetzt auch die Infos für [K] und [F2] wieder mit rein:
+  scoreEl.textContent = `Score: ${player.totalScore} | Gold: ${displayGold}/${currentLevelRequiredGold} | ❤️: ${player.lives} | Lvl: ${levelCount} | [K]: Suicide | [F2]: Reset`;
+
+  // Update status message based on game state
+  if (player.gold < currentLevelRequiredGold) {
+      statusEl.textContent = `Collect ${currentLevelRequiredGold - player.gold} more gold!`;
+  } else if (exitVisible) {
+      statusEl.textContent = "Find the Portal!";
+  } else {
+      statusEl.textContent = "Good luck, Pirate!";
+  }
+  
+  // Zähler für die Münz-Animation erhöhen
+  coinAnimTimer++;
+}
+
+function loop() {
+  if (gameState === "PLAYING") {
+    if (keys.has("ArrowLeft"))  { player.dir = "left";  tryMove(-1, 0); }
+    if (keys.has("ArrowRight")) { player.dir = "right"; tryMove( 1, 0); }
+    if (keys.has("ArrowUp"))    { player.dir = "back";  tryMove(0, -1); }
+    if (keys.has("ArrowDown"))  { player.dir = "front"; tryMove(0,  1); }
+    updatePhysics();
+
+    // Prüfen, ob wir genug Pflicht-Gold für das Portal haben
+    if (player.gold >= currentLevelRequiredGold && !exitVisible) {
+      // Wir suchen einen freien Platz für das Portal
+      let ex, ey; 
+      do { 
+          ex = Math.floor(Math.random() * (GRID_W - 2) + 1); 
+          ey = Math.floor(Math.random() * (GRID_H - 2) + 1); 
+      } while (grid[ey][ex] !== TYPES.AIR); // Das Portal soll nur auf freien Boden
+      
+      grid[ey][ex] = TYPES.EXIT; // Das Portal erscheint!
+      exitVisible = true;
+      playSfx('portal'); // Das magische Geräusch
+      statusEl.textContent = "The Portal is open! Get to the exit or find bonus gold!";
+    }
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+generateLevel();
+loop();
+
+// Funktion: Highscore in die Datenbank schreiben
+async function saveHighscore(name, score) {
+    const { error } = await supabaseClient
+        .from('highscores')
+        .insert([{ name: name, score: score }]);
+
+    if (error) {
+        console.error("Fehler beim Speichern:", error.message);
+    } else {
+        console.log("Highscore gespeichert!");
+        loadHighscores(); // Liste nach dem Speichern sofort neu laden
+    }
+}
+
+// Funktion: Top 10 aus der Datenbank holen
+async function loadHighscores() {
+    // Diese Abfrage nutzt eine spezielle Supabase-Syntax, 
+    // um den höchsten Score pro Name zu erhalten
+    const { data, error } = await supabaseClient
+        .from('highscores')
+        .select('name, score')
+        .order('score', { ascending: false });
+
+    if (error) {
+        console.error("Fehler beim Laden:", error.message);
+    } else {
+        // Wir filtern Duplikate im JavaScript, damit jeder Name nur 1x erscheint
+        const uniqueScores = [];
+        const seenNames = new Set();
+
+        for (const entry of data) {
+            if (!seenNames.has(entry.name)) {
+                uniqueScores.push(entry);
+                seenNames.add(entry.name);
+            }
+            if (uniqueScores.length >= 10) break; // Stopp bei Top 10
+        }
+        
+        topScores = uniqueScores;
+    }
+}
+// Funktion: Die Liste auf dem Bildschirm zeichnen
+function drawHighscores(centerX, startY) {
+    ctx.fillStyle = "#ffd700"; // Goldene Farbe
+    ctx.font = "bold 22px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("GLOBAL TOP 10 PIRATES", centerX, startY);
+    
+    ctx.font = "18px system-ui";
+    ctx.fillStyle = "white";
+    
+    if (topScores.length === 0) {
+        ctx.fillText("Loading scores...", centerX, startY + 40);
+    }
+
+    topScores.forEach((entry, index) => {
+        const y = startY + 40 + (index * 22);
+        ctx.textAlign = "right";
+        ctx.fillText(`${index + 1}. ${entry.name}`, centerX - 10, y);
+        ctx.textAlign = "left";
+        ctx.fillText(`: ${entry.score}`, centerX - 10, y);
+    });
+    
+    ctx.textAlign = "center"; // Reset
+}
+
+// Die Liste beim allerersten Laden der Seite füllen
+loadHighscores();
+
+function toggleFullscreen() {
+  let elem = document.documentElement; // Das ganze Dokument
+
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    // Aktivieren (mit Support für Safari/iOS)
+    if (elem.requestFullscreen) {
+      elem.requestFullscreen();
+    } else if (elem.webkitRequestFullscreen) {
+      elem.webkitRequestFullscreen();
+    }
+  } else {
+    // Beenden
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  }
+}
+
+</script>
+</body>
+</html>
