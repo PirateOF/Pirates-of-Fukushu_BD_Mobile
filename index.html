@@ -61,7 +61,8 @@
     canvas { max-height: 75vh; }
     #ui { font-size: 10px; }
     .panel { padding: 2px 5px; }
-  
+  }
+
   /* NEU: Hier fügst du die iPad-Fixes ein */
   #mobile-controls button {
     touch-action: none;
@@ -550,7 +551,7 @@ function updatePhysics() {
                         nextFalling.add(`${x},${y+1}`);
                         enemies = enemies.filter(en => {
                             if (Math.round(en.x/TILE) === x && Math.round(en.y/TILE) === y+1) {
-                                player.totalScore += 50;
+                                player.totalScore += 100;
 				playSfx('squash'); // <--sound
                                 return false;
                             }
